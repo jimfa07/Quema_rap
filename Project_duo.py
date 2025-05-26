@@ -2,19 +2,10 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
 import os
-import atexit # Para asegurar que los datos se guarden al salir
-import io # Para manejar archivos en memoria
+import atexit
+import io
 
-# --- Configuración de la página ---
-st.set_page_config(
-    page_title="Sistema de Gestión de Ventas de Aves",
-    page_icon="🐔",
-    layout="wide"
-)
-
-# --- Rutas de archivos para persistencia ---
-VENTAS_FILE = "ventas_data.csv"
-GASTOS_FILE = "gastos_data.csv"
+# ... (your existing code for functions and setup) ...
 
 # --- Funciones de carga y guardado de datos (sin base de datos) ---
 def cargar_ventas_desde_archivo():
@@ -393,10 +384,15 @@ if not st.session_state.ventas_data.empty:
         df_for_download_ventas = st.session_state.ventas_raw_data.copy()
         if not df_for_download_ventas.empty:
             df_for_download_ventas['fecha'] = pd.to_datetime(df_for_download_ventas['fecha']).dt.strftime('%Y-%m-%d') # Formato de fecha para Excel
-            csv = df_for_download_ventas.to_csv(index=False).encode('utf-8')
+            
+            # Create an in-memory Excel file
+            output = io.BytesIO()
+            df_for_download_ventas.to_excel(output, index=False, engine='xlsxwriter')
+            processed_data = output.getvalue()
+            
             st.download_button(
                 label="⬇️ Descargar Ventas a Excel",
-                data=io.BytesIO(pd.read_csv(io.BytesIO(csv)).to_excel(index=False, engine='xlsxwriter').getvalue()), # Convertir CSV a Excel
+                data=processed_data, # Directly provide the Excel bytes
                 file_name="ventas_aves.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 help="Descarga todas las ventas registradas en formato Excel."
@@ -575,10 +571,15 @@ if not st.session_state.gastos_data.empty:
         df_for_download_gastos = st.session_state.gastos_raw_data.copy()
         if not df_for_download_gastos.empty:
             df_for_download_gastos['fecha'] = pd.to_datetime(df_for_download_gastos['fecha']).dt.strftime('%Y-%m-%d') # Formato de fecha para Excel
-            csv_gastos = df_for_download_gastos.to_csv(index=False).encode('utf-8')
+            
+            # Create an in-memory Excel file
+            output_gastos = io.BytesIO()
+            df_for_download_gastos.to_excel(output_gastos, index=False, engine='xlsxwriter')
+            processed_data_gastos = output_gastos.getvalue()
+
             st.download_button(
                 label="⬇️ Descargar Gastos a Excel",
-                data=io.BytesIO(pd.read_csv(io.BytesIO(csv_gastos)).to_excel(index=False, engine='xlsxwriter').getvalue()), # Convertir CSV a Excel
+                data=processed_data_gastos, # Directly provide the Excel bytes
                 file_name="gastos_aves.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 help="Descarga todos los gastos registrados en formato Excel."
@@ -672,4 +673,3 @@ if not st.session_state.gastos_raw_data.empty: # Usar raw_data para la condició
                 st.session_state['confirm_delete_gastos'] = False
                 st.info("Operación de limpieza de gastos cancelada.")
                 st.rerun()
-
