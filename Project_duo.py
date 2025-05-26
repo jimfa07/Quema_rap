@@ -21,9 +21,11 @@ def init_database():
     Usa DATABASE_URL del entorno.
     """
     try:
+        # Intenta obtener la URL de la base de datos de la variable de entorno
         database_url = os.getenv('DATABASE_URL')
+        
         if not database_url:
-            st.warning("⚠️ No se encontró la variable de entorno 'DATABASE_URL'. La aplicación funcionará sin persistencia de datos.")
+            st.warning("⚠️ No se encontró la variable de entorno 'DATABASE_URL'. La aplicación funcionará sin persistencia de datos (los datos se perderán al cerrar).")
             return None
         
         # Se añaden parámetros para timeout si no están ya en la URL, útiles para algunas DBs
@@ -72,10 +74,10 @@ def init_database():
         st.success("Conexión a la base de datos establecida y tablas verificadas. ¡Listo para operar!")
         return engine
     except OperationalError as e:
-        st.error(f"❌ Error de conexión a la base de datos: {e}. Por favor, verifica la URL de la base de datos y que el servidor esté activo.")
+        st.error(f"❌ Error de conexión a la base de datos: {e}. Por favor, verifica la URL de la base de datos y que el servidor esté activo. (Detalles: {e})")
         return None
     except SQLAlchemyError as e:
-        st.error(f"❌ Error de SQLAlchemy al inicializar la base de datos: {e}. Esto puede ser un problema con la configuración de la DB o el driver.")
+        st.error(f"❌ Error de SQLAlchemy al inicializar la base de datos: {e}. Esto puede ser un problema con la configuración de la DB o el driver. (Detalles: {e})")
         return None
     except Exception as e:
         st.error(f"❌ Un error inesperado ocurrió durante la inicialización de la base de datos: {e}")
@@ -212,17 +214,17 @@ if 'gastos_data' not in st.session_state:
 
 # --- Listas predefinidas ---
 CLIENTES = [
-    "D. Vicente", "D. Jorge", "D. Quinde", "Sra. Isabel", "Sra. Alba", 
-    "Sra Yolanda", "Sra Laura Mercado", "D. Segundo", "Legumbrero", 
-    "Peruana Posorja", "Sra. Sofia", "Sra. Jessica", "Sra Alado de Jessica", 
-    "Comedor Gordo Posorja", "Sra. Celeste", "Caro negro", "Tienda Isabel Posorja", 
+    "D. Vicente", "D. Jorge", "D. Quinde", "Sra. Isabel", "Sra. Alba",
+    "Sra Yolanda", "Sra Laura Mercado", "D. Segundo", "Legumbrero",
+    "Peruana Posorja", "Sra. Sofia", "Sra. Jessica", "Sra Alado de Jessica",
+    "Comedor Gordo Posorja", "Sra. Celeste", "Caro negro", "Tienda Isabel Posorja",
     "Carnicero Posorja", "Senel", "D. Jonny", "D. Sra Madelyn", "Lobo Mercado"
 ]
 
 TIPOS_AVE = ["Pollo", "Gallina"]
 
 CATEGORIAS_GASTO = [
-    "G. Alimentación", "G. Transporte", "G. Producción", "G. Salud", 
+    "G. Alimentación", "G. Transporte", "G. Producción", "G. Salud",
     "G. Educación", "G. Mano de obra", "G. Pérdida", "G. Varios", "Otros Gastos"
 ]
 
@@ -259,48 +261,48 @@ def analizar_alertas_clientes(ventas_df):
     """Analiza el DataFrame de ventas para identificar clientes con alertas."""
     if ventas_df.empty:
         return pd.DataFrame()
-    
+
     # Asegúrate de trabajar con una copia para evitar SettingWithCopyWarning
-    df_temp = ventas_df.copy() 
+    df_temp = ventas_df.copy()
     df_temp['Fecha'] = pd.to_datetime(df_temp['Fecha'])
-    
+
     alertas = []
-    
+
     for cliente in df_temp['Cliente'].unique():
         cliente_ventas = df_temp[df_temp['Cliente'] == cliente].copy()
         cliente_ventas = cliente_ventas.sort_values('Fecha')
-        
+
         saldo_total = cliente_ventas['Saldo'].sum()
-        
+
         debe_mas_10 = saldo_total > 10
-        
+
         dias_consecutivos = 0
         # Filtrar solo fechas con saldo positivo
         fechas_con_saldo = cliente_ventas[cliente_ventas['Saldo'] > 0]['Fecha'].dt.date.unique()
-        
+
         if len(fechas_con_saldo) >= 2:
             fechas_ordenadas = sorted(list(fechas_con_saldo))
             consecutivos_actual = 1
             max_consecutivos = 1
-            
+
             for i in range(1, len(fechas_ordenadas)):
                 if (fechas_ordenadas[i] - fechas_ordenadas[i-1]).days == 1:
                     consecutivos_actual += 1
                     max_consecutivos = max(max_consecutivos, consecutivos_actual)
                 else:
                     consecutivos_actual = 1
-            
+
             dias_consecutivos = max_consecutivos
-        
+
         if debe_mas_10 or dias_consecutivos >= 2:
             ultima_fecha = cliente_ventas['Fecha'].max().strftime('%Y-%m-%d')
-            
+
             motivos = []
             if debe_mas_10:
                 motivos.append(f"Debe más de $10 (${saldo_total:.2f})")
             if dias_consecutivos >= 2:
                 motivos.append(f"Saldo por {dias_consecutivos} día(s) consecutivo(s)")
-            
+
             alertas.append({
                 'Cliente': cliente,
                 'Saldo_Total': saldo_total,
@@ -308,7 +310,7 @@ def analizar_alertas_clientes(ventas_df):
                 'Motivo_Alerta': " | ".join(motivos),
                 'Prioridad': 'Alta' if debe_mas_10 and dias_consecutivos >= 2 else 'Media'
             })
-    
+
     return pd.DataFrame(alertas)
 
 
@@ -567,4 +569,3 @@ if not st.session_state.gastos_data.empty:
                 st.session_state['confirm_delete_gastos'] = False
                 st.info("Operación de limpieza de gastos cancelada.")
                 st.rerun()
-
