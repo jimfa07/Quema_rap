@@ -5,7 +5,17 @@ import os
 import atexit
 import io
 
-# ... (your existing code for functions and setup) ...
+# --- Configuración de Archivos ---
+# Obtener el directorio actual del script
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Crear un subdirectorio 'data' si no existe
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Rutas completas a los archivos CSV
+VENTAS_FILE = os.path.join(DATA_DIR, 'ventas.csv')
+GASTOS_FILE = os.path.join(DATA_DIR, 'gastos.csv')
+
 
 # --- Funciones de carga y guardado de datos (sin base de datos) ---
 def cargar_ventas_desde_archivo():
@@ -248,7 +258,7 @@ def analizar_alertas_clientes(ventas_df):
 
             motivos = []
             if debe_mas_10:
-                motivos.append(f"Debe más de $10 (${saldo_total:.2f})")
+                motivos.append(f"Debe más de ${saldo_total:.2f}")
             if dias_consecutivos >= 2:
                 motivos.append(f"Saldo por {dias_consecutivos} día(s) consecutivo(s)")
 
@@ -266,8 +276,8 @@ def analizar_alertas_clientes(ventas_df):
 # --- SECCIÓN 1: TABLA DE VENTAS ---
 st.header("📊 Registro de Ventas")
 
+---
 ### 🚨 Alertas de Clientes
-st.subheader("🚨 Alertas de Clientes")
 alertas_df = analizar_alertas_clientes(st.session_state.ventas_data)
 if not alertas_df.empty:
     st.dataframe(alertas_df, use_container_width=True, hide_index=True)
@@ -275,8 +285,7 @@ if not alertas_df.empty:
 else:
     st.info("🎉 ¡No hay alertas de clientes pendientes! Todos los saldos al día.")
 
-st.divider()
-
+---
 ### ➕ Agregar Nueva Venta
 with st.expander("📝 Formulario de Nueva Venta", expanded=True):
     col1, col2, col3, col4 = st.columns(4)
@@ -344,11 +353,9 @@ with st.expander("📝 Formulario de Nueva Venta", expanded=True):
         else:
             st.error("❌ Por favor complete los campos obligatorios: **Cantidad**, **Libras**, **Precio**.")
 
-st.divider()
-
+---
 ### 📋 Historial de Ventas
 if not st.session_state.ventas_data.empty:
-    st.subheader("📋 Historial de Ventas")
     df_display = st.session_state.ventas_data.copy()
     # Eliminar columna 'Fecha DB' ya que 'Fecha' es la que se muestra
     df_display = df_display.drop(columns=['Fecha DB'], errors='ignore') 
@@ -374,9 +381,8 @@ if not st.session_state.ventas_data.empty:
     with col3:
         st.metric("📈 Saldo Pendiente General", formatear_moneda(saldo_pendiente))
 
-    st.markdown("---")
+    ---
     ### 📤 Opciones de Importación y Exportación de Ventas
-    st.subheader("📥 Exportar / 📤 Importar Ventas")
     col_exp_imp_ventas_1, col_exp_imp_ventas_2 = st.columns(2)
 
     with col_exp_imp_ventas_1:
@@ -466,7 +472,6 @@ if not st.session_state.ventas_data.empty:
 else:
     st.info("📝 No hay ventas registradas. ¡Empieza a agregar ventas usando el formulario de arriba!")
 
-
 # Botón para limpiar datos de ventas
 if not st.session_state.ventas_raw_data.empty: # Usar raw_data para la condición
     with st.expander("🗑️ Opciones Avanzadas de Ventas (Eliminar Datos)"):
@@ -491,11 +496,11 @@ if not st.session_state.ventas_raw_data.empty: # Usar raw_data para la condició
                 st.info("Operación de limpieza de ventas cancelada.")
                 st.rerun()
 
-st.divider()
-
+---
 # --- SECCIÓN 2: TABLA DE GASTOS ---
 st.header("💸 Control de Gastos")
 
+---
 ### ➕ Agregar Nuevo Gasto
 with st.expander("📝 Formulario de Nuevo Gasto", expanded=True):
     col1, col2, col3 = st.columns(3)
@@ -543,11 +548,9 @@ with st.expander("📝 Formulario de Nuevo Gasto", expanded=True):
         else:
             st.error("❌ Por favor, ingrese un valor de **Dinero** mayor a 0 para el gasto.")
 
-st.divider()
-
+---
 ### 📈 Historial de Gastos
 if not st.session_state.gastos_data.empty:
-    st.subheader("📈 Historial de Gastos")
     df_display_gastos = st.session_state.gastos_data.copy()
     # Eliminar columna 'Fecha DB'
     df_display_gastos = df_display_gastos.drop(columns=['Fecha DB'], errors='ignore')
@@ -561,9 +564,8 @@ if not st.session_state.gastos_data.empty:
     total_gastos = st.session_state.gastos_raw_data['dinero'].sum()
     st.metric("💸 Total Gastos Registrados", formatear_moneda(total_gastos))
 
-    st.markdown("---")
+    ---
     ### 📤 Opciones de Importación y Exportación de Gastos
-    st.subheader("📥 Exportar / 📤 Importar Gastos")
     col_exp_imp_gastos_1, col_exp_imp_gastos_2 = st.columns(2)
 
     with col_exp_imp_gastos_1:
