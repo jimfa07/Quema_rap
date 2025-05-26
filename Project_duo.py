@@ -5,6 +5,7 @@ import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 import atexit # Para asegurar que la conexión a la DB se cierre al salir
+import io # Para manejar archivos en memoria
 
 # --- Configuración de la página ---
 st.set_page_config(
@@ -272,13 +273,13 @@ def analizar_alertas_clientes(ventas_df):
         cliente_ventas = df_temp[df_temp['Cliente'] == cliente].copy()
         cliente_ventas = cliente_ventas.sort_values('Fecha')
 
-        saldo_total = cliente_ventas['Saldo'].sum()
+        saldo_total = cliente_ventas['Saldo'].apply(lambda x: float(x.replace('$', '').replace(',', '')) if isinstance(x, str) else x).sum()
 
         debe_mas_10 = saldo_total > 10
 
         dias_consecutivos = 0
         # Filtrar solo fechas con saldo positivo
-        fechas_con_saldo = cliente_ventas[cliente_ventas['Saldo'] > 0]['Fecha'].dt.date.unique()
+        fechas_con_saldo = cliente_ventas[cliente_ventas['Saldo'].apply(lambda x: float(x.replace('$', '').replace(',', '')) if isinstance(x, str) else x) > 0]['Fecha'].dt.date.unique()
 
         if len(fechas_con_saldo) >= 2:
             fechas_ordenadas = sorted(list(fechas_con_saldo))
@@ -379,7 +380,7 @@ with st.expander("📝 Formulario de Nueva Venta", expanded=True):
                 st.session_state.ventas_data = get_ventas_df_processed(engine)
                 st.success(f"✅ Venta para **'{cliente}'** guardada exitosamente en la base de datos.")
             else:
-                # Fallback para guardar en memoria si no hay DB o falla
+                # Fallback para guardar en memoria si no hay DB o falla (esto no debería ocurrir con la DB activa)
                 nueva_fila_display = {
                     'Fecha': fecha_venta, 'Cliente': cliente, 'Tipo': tipo_ave,
                     'Cantidad': cantidad, 'Libras': libras, 'Descuento': descuento,
@@ -388,7 +389,7 @@ with st.expander("📝 Formulario de Nueva Venta", expanded=True):
                 }
                 # Concatena el nuevo DataFrame al inicio para que aparezca primero
                 st.session_state.ventas_data = pd.concat([pd.DataFrame([nueva_fila_display]), st.session_state.ventas_data], ignore_index=True)
-                st.success(f"✅ Venta para **'{cliente}'** agregada exitosamente (sin persistencia en DB).")
+                st.info(f"✅ Venta para **'{cliente}'** agregada exitosamente (sin persistencia en DB).") # Cambiado a info para indicar que no hay persistencia real.
             
             # Resetear valores del formulario usando keys de session_state
             st.session_state['cantidad_venta_val'] = 0
@@ -420,6 +421,7 @@ if not st.session_state.ventas_data.empty:
     st.dataframe(df_display, use_container_width=True, hide_index=True)
     
     # Resumen de ventas
+    # Asegurarse de que los valores sean numéricos antes de sumar, quitando el símbolo de moneda y coma
     total_ventas = st.session_state.ventas_data['Total_a_cobrar'].sum()
     total_pagos = st.session_state.ventas_data['Pago_Cliente'].sum()
     saldo_pendiente = st.session_state.ventas_data['Saldo'].sum()
@@ -431,8 +433,96 @@ if not st.session_state.ventas_data.empty:
         st.metric("💵 Total Pagos Recibidos", formatear_moneda(total_pagos))
     with col3:
         st.metric("📈 Saldo Pendiente General", formatear_moneda(saldo_pendiente))
+
+    st.markdown("---")
+    ### 📤 Opciones de Importación y Exportación de Ventas
+    st.subheader("📥 Exportar / 📤 Importar Ventas")
+    col_exp_imp_ventas_1, col_exp_imp_ventas_2 = st.columns(2)
+
+    with col_exp_imp_ventas_1:
+        # Botón para descargar a Excel
+        # Asegurarse de descargar los datos tal como están en la DB (sin formateo de moneda)
+        df_for_download_ventas = cargar_ventas_desde_db(engine)
+        if not df_for_download_ventas.empty:
+            df_for_download_ventas['fecha'] = df_for_download_ventas['fecha'].dt.strftime('%Y-%m-%d') # Formato de fecha para Excel
+            csv = df_for_download_ventas.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="⬇️ Descargar Ventas a Excel",
+                data=io.BytesIO(pd.read_csv(io.BytesIO(csv)).to_excel(index=False, engine='xlsxwriter').getvalue()), # Convertir CSV a Excel
+                file_name="ventas_aves.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Descarga todas las ventas registradas en formato Excel."
+            )
+        else:
+            st.info("No hay datos de ventas para descargar.")
+
+    with col_exp_imp_ventas_2:
+        # Cargador de archivos para importar ventas
+        uploaded_file_ventas = st.file_uploader("⬆️ Importar Ventas desde Excel", type=["xlsx"], key="upload_ventas_excel")
+        if uploaded_file_ventas:
+            try:
+                df_imported_ventas = pd.read_excel(uploaded_file_ventas)
+                
+                # Nombres de columnas esperados en la DB
+                expected_cols_db_ventas = [
+                    'fecha', 'cliente', 'tipo', 'cantidad', 'libras', 'descuento', 
+                    'libras_netas', 'precio', 'total_a_cobrar', 'pago_cliente', 'saldo'
+                ]
+                
+                # Convertir nombres de columnas a minúsculas y sin espacios para validación
+                df_imported_ventas.columns = df_imported_ventas.columns.str.lower().str.replace(' ', '_')
+
+                # Validar que las columnas necesarias existan
+                if not all(col in df_imported_ventas.columns for col in expected_cols_db_ventas):
+                    st.error(f"❌ El archivo Excel de ventas no tiene las columnas requeridas. Asegúrate de que existan: {', '.join(expected_cols_db_ventas)}")
+                else:
+                    rows_imported = 0
+                    errors_found = 0
+                    for index, row in df_imported_ventas.iterrows():
+                        try:
+                            # Asegurarse de que la fecha sea un objeto date
+                            if isinstance(row['fecha'], pd.Timestamp):
+                                fecha_obj = row['fecha'].date()
+                            else:
+                                fecha_obj = pd.to_datetime(row['fecha']).date()
+
+                            venta_data = {
+                                'fecha': fecha_obj,
+                                'cliente': str(row['cliente']),
+                                'tipo': str(row['tipo']),
+                                'cantidad': int(row['cantidad']),
+                                'libras': float(row['libras']),
+                                'descuento': float(row['descuento']),
+                                'libras_netas': float(row['libras_netas']),
+                                'precio': float(row['precio']),
+                                'total_a_cobrar': float(row['total_a_cobrar']),
+                                'pago_cliente': float(row['pago_cliente']),
+                                'saldo': float(row['saldo'])
+                            }
+                            if engine and guardar_venta_en_db(engine, venta_data):
+                                rows_imported += 1
+                            else:
+                                errors_found += 1
+                        except Exception as e:
+                            errors_found += 1
+                            st.warning(f"⚠️ Error al importar fila {index + 2} (datos: {row.to_dict()}): {e}")
+
+                    if rows_imported > 0:
+                        st.session_state.ventas_data = get_ventas_df_processed(engine)
+                        st.success(f"✅ Se importaron **{rows_imported}** ventas exitosamente desde el archivo Excel.")
+                        if errors_found > 0:
+                            st.warning(f"Se encontraron {errors_found} errores al importar algunas filas.")
+                        st.rerun()
+                    elif errors_found > 0:
+                        st.error("No se pudo importar ninguna venta. Revisa los errores detallados arriba.")
+                    else:
+                        st.info("No se encontraron ventas válidas en el archivo para importar.")
+
+            except Exception as e:
+                st.error(f"❌ Error al leer el archivo Excel de ventas: {e}. Asegúrate de que sea un archivo .xlsx válido y tenga el formato correcto.")
 else:
     st.info("📝 No hay ventas registradas. ¡Empieza a agregar ventas usando el formulario de arriba!")
+
 
 # Botón para limpiar datos de ventas
 if not st.session_state.ventas_data.empty:
@@ -450,7 +540,7 @@ if not st.session_state.ventas_data.empty:
                     st.session_state.ventas_data = get_ventas_df_processed(engine)
                     st.success("✅ Todas las ventas han sido eliminadas exitosamente de la base de datos y de la aplicación.")
                 else:
-                    # Si no hay DB o falló, limpiar solo el estado
+                    # Si no hay DB o falló, limpiar solo el estado (esto no debería ocurrir si la DB está activa)
                     st.session_state.ventas_data = pd.DataFrame(columns=[
                         'Fecha', 'Cliente', 'Tipo', 'Cantidad', 'Libras', 'Descuento', 
                         'Libras_netas', 'Precio', 'Total_a_cobrar', 'Pago_Cliente', 'Saldo'
@@ -503,7 +593,7 @@ with st.expander("📝 Formulario de Nuevo Gasto", expanded=True):
                 st.session_state.gastos_data = get_gastos_df_processed(engine)
                 st.success(f"✅ Gasto de **'{categoria_gasto}'** por {formatear_moneda(dinero)} guardado exitosamente en la base de datos.")
             else:
-                # Fallback para guardar en memoria si no hay DB o falla
+                # Fallback para guardar en memoria si no hay DB o falla (esto no debería ocurrir con la DB activa)
                 nuevo_gasto_display = {
                     'Fecha': fecha_gasto, 'Calculo': calculo, 'Descripcion': descripcion,
                     'Gasto': categoria_gasto, 'Dinero': dinero
@@ -539,6 +629,86 @@ if not st.session_state.gastos_data.empty:
     # Resumen de gastos
     total_gastos = st.session_state.gastos_data['Dinero'].sum()
     st.metric("💸 Total Gastos Registrados", formatear_moneda(total_gastos))
+
+    st.markdown("---")
+    ### 📤 Opciones de Importación y Exportación de Gastos
+    st.subheader("📥 Exportar / 📤 Importar Gastos")
+    col_exp_imp_gastos_1, col_exp_imp_gastos_2 = st.columns(2)
+
+    with col_exp_imp_gastos_1:
+        # Botón para descargar a Excel
+        # Asegurarse de descargar los datos tal como están en la DB (sin formateo de moneda)
+        df_for_download_gastos = cargar_gastos_desde_db(engine)
+        if not df_for_download_gastos.empty:
+            df_for_download_gastos['fecha'] = df_for_download_gastos['fecha'].dt.strftime('%Y-%m-%d') # Formato de fecha para Excel
+            csv_gastos = df_for_download_gastos.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="⬇️ Descargar Gastos a Excel",
+                data=io.BytesIO(pd.read_csv(io.BytesIO(csv_gastos)).to_excel(index=False, engine='xlsxwriter').getvalue()), # Convertir CSV a Excel
+                file_name="gastos_aves.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Descarga todos los gastos registrados en formato Excel."
+            )
+        else:
+            st.info("No hay datos de gastos para descargar.")
+
+    with col_exp_imp_gastos_2:
+        # Cargador de archivos para importar gastos
+        uploaded_file_gastos = st.file_uploader("⬆️ Importar Gastos desde Excel", type=["xlsx"], key="upload_gastos_excel")
+        if uploaded_file_gastos:
+            try:
+                df_imported_gastos = pd.read_excel(uploaded_file_gastos)
+                
+                # Nombres de columnas esperados en la DB
+                expected_cols_db_gastos = [
+                    'fecha', 'calculo', 'descripcion', 'gasto', 'dinero'
+                ]
+
+                # Convertir nombres de columnas a minúsculas y sin espacios para validación
+                df_imported_gastos.columns = df_imported_gastos.columns.str.lower().str.replace(' ', '_')
+
+                # Validar que las columnas necesarias existan
+                if not all(col in df_imported_gastos.columns for col in expected_cols_db_gastos):
+                    st.error(f"❌ El archivo Excel de gastos no tiene las columnas requeridas. Asegúrate de que existan: {', '.join(expected_cols_db_gastos)}")
+                else:
+                    rows_imported = 0
+                    errors_found = 0
+                    for index, row in df_imported_gastos.iterrows():
+                        try:
+                            # Asegurarse de que la fecha sea un objeto date
+                            if isinstance(row['fecha'], pd.Timestamp):
+                                fecha_obj = row['fecha'].date()
+                            else:
+                                fecha_obj = pd.to_datetime(row['fecha']).date()
+
+                            gasto_data = {
+                                'fecha': fecha_obj,
+                                'calculo': float(row['calculo']),
+                                'descripcion': str(row['descripcion']) if pd.notna(row['descripcion']) else '',
+                                'gasto': str(row['gasto']),
+                                'dinero': float(row['dinero'])
+                            }
+                            if engine and guardar_gasto_en_db(engine, gasto_data):
+                                rows_imported += 1
+                            else:
+                                errors_found += 1
+                        except Exception as e:
+                            errors_found += 1
+                            st.warning(f"⚠️ Error al importar fila {index + 2} (datos: {row.to_dict()}): {e}")
+
+                    if rows_imported > 0:
+                        st.session_state.gastos_data = get_gastos_df_processed(engine)
+                        st.success(f"✅ Se importaron **{rows_imported}** gastos exitosamente desde el archivo Excel.")
+                        if errors_found > 0:
+                            st.warning(f"Se encontraron {errors_found} errores al importar algunas filas.")
+                        st.rerun()
+                    elif errors_found > 0:
+                        st.error("No se pudo importar ningún gasto. Revisa los errores detallados arriba.")
+                    else:
+                        st.info("No se encontraron gastos válidos en el archivo para importar.")
+
+            except Exception as e:
+                st.error(f"❌ Error al leer el archivo Excel de gastos: {e}. Asegúrate de que sea un archivo .xlsx válido y tenga el formato correcto.")
 else:
     st.info("📝 No hay gastos registrados. ¡Empieza a agregar gastos usando el formulario de arriba!")
 
