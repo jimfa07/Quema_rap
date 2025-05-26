@@ -2,3 +2,6 @@ streamlit
 pandas
 openpyxl
 fpdf
+SQLAlchemy
+psycopg2-binary
+
