@@ -4,4 +4,4 @@ openpyxl
 fpdf
 SQLAlchemy
 psycopg2-binary
-
+xlsxwriter
