@@ -276,8 +276,9 @@ def analizar_alertas_clientes(ventas_df):
 # --- SECCIÓN 1: TABLA DE VENTAS ---
 st.header("📊 Registro de Ventas")
 
----
+st.divider() # Corregido: antes era '---'
 ### 🚨 Alertas de Clientes
+st.subheader("🚨 Alertas de Clientes") # Agregado para que tenga un subtítulo como en el código original
 alertas_df = analizar_alertas_clientes(st.session_state.ventas_data)
 if not alertas_df.empty:
     st.dataframe(alertas_df, use_container_width=True, hide_index=True)
@@ -285,7 +286,8 @@ if not alertas_df.empty:
 else:
     st.info("🎉 ¡No hay alertas de clientes pendientes! Todos los saldos al día.")
 
----
+st.divider() # Corregido: antes era '---'
+
 ### ➕ Agregar Nueva Venta
 with st.expander("📝 Formulario de Nueva Venta", expanded=True):
     col1, col2, col3, col4 = st.columns(4)
@@ -353,9 +355,11 @@ with st.expander("📝 Formulario de Nueva Venta", expanded=True):
         else:
             st.error("❌ Por favor complete los campos obligatorios: **Cantidad**, **Libras**, **Precio**.")
 
----
+st.divider() # Corregido: antes era '---'
+
 ### 📋 Historial de Ventas
 if not st.session_state.ventas_data.empty:
+    st.subheader("📋 Historial de Ventas")
     df_display = st.session_state.ventas_data.copy()
     # Eliminar columna 'Fecha DB' ya que 'Fecha' es la que se muestra
     df_display = df_display.drop(columns=['Fecha DB'], errors='ignore') 
@@ -381,8 +385,9 @@ if not st.session_state.ventas_data.empty:
     with col3:
         st.metric("📈 Saldo Pendiente General", formatear_moneda(saldo_pendiente))
 
-    ---
+    st.divider() # Corregido: antes era 'st.markdown("---")'
     ### 📤 Opciones de Importación y Exportación de Ventas
+    st.subheader("📥 Exportar / 📤 Importar Ventas")
     col_exp_imp_ventas_1, col_exp_imp_ventas_2 = st.columns(2)
 
     with col_exp_imp_ventas_1:
@@ -472,6 +477,7 @@ if not st.session_state.ventas_data.empty:
 else:
     st.info("📝 No hay ventas registradas. ¡Empieza a agregar ventas usando el formulario de arriba!")
 
+
 # Botón para limpiar datos de ventas
 if not st.session_state.ventas_raw_data.empty: # Usar raw_data para la condición
     with st.expander("🗑️ Opciones Avanzadas de Ventas (Eliminar Datos)"):
@@ -496,11 +502,12 @@ if not st.session_state.ventas_raw_data.empty: # Usar raw_data para la condició
                 st.info("Operación de limpieza de ventas cancelada.")
                 st.rerun()
 
----
+st.divider() # Corregido: antes era '---'
+
 # --- SECCIÓN 2: TABLA DE GASTOS ---
 st.header("💸 Control de Gastos")
 
----
+st.divider() # Agregado un separador antes de la sección de gastos
 ### ➕ Agregar Nuevo Gasto
 with st.expander("📝 Formulario de Nuevo Gasto", expanded=True):
     col1, col2, col3 = st.columns(3)
@@ -548,9 +555,11 @@ with st.expander("📝 Formulario de Nuevo Gasto", expanded=True):
         else:
             st.error("❌ Por favor, ingrese un valor de **Dinero** mayor a 0 para el gasto.")
 
----
+st.divider() # Corregido: antes era '---'
+
 ### 📈 Historial de Gastos
 if not st.session_state.gastos_data.empty:
+    st.subheader("📈 Historial de Gastos")
     df_display_gastos = st.session_state.gastos_data.copy()
     # Eliminar columna 'Fecha DB'
     df_display_gastos = df_display_gastos.drop(columns=['Fecha DB'], errors='ignore')
@@ -564,8 +573,9 @@ if not st.session_state.gastos_data.empty:
     total_gastos = st.session_state.gastos_raw_data['dinero'].sum()
     st.metric("💸 Total Gastos Registrados", formatear_moneda(total_gastos))
 
-    ---
+    st.divider() # Corregido: antes era 'st.markdown("---")'
     ### 📤 Opciones de Importación y Exportación de Gastos
+    st.subheader("📥 Exportar / 📤 Importar Gastos")
     col_exp_imp_gastos_1, col_exp_imp_gastos_2 = st.columns(2)
 
     with col_exp_imp_gastos_1:
