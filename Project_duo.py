@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
 import os
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
-import atexit # Para asegurar que la conexión a la DB se cierre al salir
+import atexit # Para asegurar que los datos se guarden al salir
 import io # Para manejar archivos en memoria
 
 # --- Configuración de la página ---
@@ -14,170 +12,77 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Configuración y funciones de la base de datos ---
-@st.cache_resource
-def init_database():
-    """
-    Inicializa la conexión a la base de datos y crea las tablas si no existen.
-    Usa DATABASE_URL del entorno.
-    """
-    try:
-        # Intenta obtener la URL de la base de datos de la variable de entorno
-        database_url = os.getenv('DATABASE_URL')
-        
-        if not database_url:
-            st.warning("⚠️ No se encontró la variable de entorno 'DATABASE_URL'. La aplicación funcionará sin persistencia de datos (los datos se perderán al cerrar).")
-            return None
-        
-        # Se añaden parámetros para timeout si no están ya en la URL, útiles para algunas DBs
-        if "postgresql" in database_url and "connect_timeout" not in database_url:
-            database_url += "?connect_timeout=10"
-        
-        engine = create_engine(database_url)
-        
-        # Intentar una conexión para verificar que el engine es válido
-        with engine.connect() as conn:
-            # Crear las tablas si no existen
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS ventas (
-                    id SERIAL PRIMARY KEY,
-                    fecha DATE NOT NULL,
-                    cliente VARCHAR(100) NOT NULL,
-                    tipo VARCHAR(50) NOT NULL,
-                    cantidad INTEGER NOT NULL,
-                    libras DECIMAL(10,2) NOT NULL,
-                    descuento DECIMAL(10,2) NOT NULL,
-                    libras_netas DECIMAL(10,2) NOT NULL,
-                    precio DECIMAL(10,2) NOT NULL,
-                    total_a_cobrar DECIMAL(10,2) NOT NULL,
-                    pago_cliente DECIMAL(10,2) NOT NULL,
-                    saldo DECIMAL(10,2) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS gastos (
-                    id SERIAL PRIMARY KEY,
-                    fecha DATE NOT NULL,
-                    calculo DECIMAL(10,2) NOT NULL,
-                    descripcion TEXT,
-                    gasto VARCHAR(100) NOT NULL,
-                    dinero DECIMAL(10,2) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            conn.commit()
-        
-        # Asegurar que el engine se cierre al salir de la aplicación
-        atexit.register(lambda: engine.dispose())
-        
-        st.success("Conexión a la base de datos establecida y tablas verificadas. ¡Listo para operar!")
-        return engine
-    except OperationalError as e:
-        st.error(f"❌ Error de conexión a la base de datos: {e}. Por favor, verifica la URL de la base de datos y que el servidor esté activo. (Detalles: {e})")
-        return None
-    except SQLAlchemyError as e:
-        st.error(f"❌ Error de SQLAlchemy al inicializar la base de datos: {e}. Esto puede ser un problema con la configuración de la DB o el driver. (Detalles: {e})")
-        return None
-    except Exception as e:
-        st.error(f"❌ Un error inesperado ocurrió durante la inicialización de la base de datos: {e}")
-        return None
+# --- Rutas de archivos para persistencia ---
+VENTAS_FILE = "ventas_data.csv"
+GASTOS_FILE = "gastos_data.csv"
 
-def cargar_ventas_desde_db(engine):
-    """Carga todas las ventas desde la base de datos."""
-    if not engine: return pd.DataFrame()
-    try:
-        query = """
-        SELECT fecha, cliente, tipo, cantidad, libras, descuento, 
-               libras_netas, precio, total_a_cobrar, pago_cliente, saldo
-        FROM ventas 
-        ORDER BY fecha DESC, id DESC
-        """
-        return pd.read_sql(query, engine)
-    except Exception as e:
-        st.error(f"Error cargando ventas desde la base de datos: {e}")
-        return pd.DataFrame()
+# --- Funciones de carga y guardado de datos (sin base de datos) ---
+def cargar_ventas_desde_archivo():
+    """Carga las ventas desde un archivo CSV. Si no existe, devuelve un DataFrame vacío."""
+    if os.path.exists(VENTAS_FILE):
+        try:
+            df = pd.read_csv(VENTAS_FILE)
+            # Asegúrate de que las columnas de fecha sean objetos date
+            if 'fecha' in df.columns:
+                df['fecha'] = pd.to_datetime(df['fecha']).dt.date
+            return df
+        except Exception as e:
+            st.error(f"Error al cargar ventas desde {VENTAS_FILE}: {e}")
+            return pd.DataFrame(columns=['fecha', 'cliente', 'tipo', 'cantidad', 'libras', 'descuento',
+                                         'libras_netas', 'precio', 'total_a_cobrar', 'pago_cliente', 'saldo'])
+    return pd.DataFrame(columns=['fecha', 'cliente', 'tipo', 'cantidad', 'libras', 'descuento',
+                                 'libras_netas', 'precio', 'total_a_cobrar', 'pago_cliente', 'saldo'])
 
-def cargar_gastos_desde_db(engine):
-    """Carga todos los gastos desde la base de datos."""
-    if not engine: return pd.DataFrame()
-    try:
-        query = """
-        SELECT fecha, calculo, descripcion, gasto, dinero
-        FROM gastos 
-        ORDER BY fecha DESC, id DESC
-        """
-        return pd.read_sql(query, engine)
-    except Exception as e:
-        st.error(f"Error cargando gastos desde la base de datos: {e}")
-        return pd.DataFrame()
+def cargar_gastos_desde_archivo():
+    """Carga los gastos desde un archivo CSV. Si no existe, devuelve un DataFrame vacío."""
+    if os.path.exists(GASTOS_FILE):
+        try:
+            df = pd.read_csv(GASTOS_FILE)
+            # Asegúrate de que las columnas de fecha sean objetos date
+            if 'fecha' in df.columns:
+                df['fecha'] = pd.to_datetime(df['fecha']).dt.date
+            return df
+        except Exception as e:
+            st.error(f"Error al cargar gastos desde {GASTOS_FILE}: {e}")
+            return pd.DataFrame(columns=['fecha', 'calculo', 'descripcion', 'gasto', 'dinero'])
+    return pd.DataFrame(columns=['fecha', 'calculo', 'descripcion', 'gasto', 'dinero'])
 
-def guardar_venta_en_db(engine, venta_data):
-    """Guarda una nueva venta en la base de datos."""
-    if not engine: return False
-    try:
-        with engine.connect() as conn:
-            query = text("""
-                INSERT INTO ventas (fecha, cliente, tipo, cantidad, libras, descuento, 
-                                  libras_netas, precio, total_a_cobrar, pago_cliente, saldo)
-                VALUES (:fecha, :cliente, :tipo, :cantidad, :libras, :descuento,
-                        :libras_netas, :precio, :total_a_cobrar, :pago_cliente, :saldo)
-            """)
-            conn.execute(query, venta_data)
-            conn.commit()
-        return True
-    except Exception as e:
-        st.error(f"Error guardando venta en la base de datos: {e}")
-        return False
+def guardar_dataframes_en_archivos():
+    """Guarda los DataFrames de ventas y gastos en archivos CSV."""
+    if 'ventas_raw_data' in st.session_state and not st.session_state.ventas_raw_data.empty:
+        # Asegurarse de que la columna 'fecha' sea compatible con .to_csv (string o datetime)
+        df_to_save_ventas = st.session_state.ventas_raw_data.copy()
+        if 'fecha' in df_to_save_ventas.columns:
+             # Convertir solo si es necesario (ej. si son objetos date.date y no datetime)
+            df_to_save_ventas['fecha'] = pd.to_datetime(df_to_save_ventas['fecha']).dt.strftime('%Y-%m-%d')
+        df_to_save_ventas.to_csv(VENTAS_FILE, index=False)
+        # Si prefieres Excel, descomenta la siguiente línea y comenta la anterior:
+        # st.session_state.ventas_raw_data.to_excel(VENTAS_FILE.replace(".csv", ".xlsx"), index=False, engine='xlsxwriter')
+    
+    if 'gastos_raw_data' in st.session_state and not st.session_state.gastos_raw_data.empty:
+        # Asegurarse de que la columna 'fecha' sea compatible con .to_csv (string o datetime)
+        df_to_save_gastos = st.session_state.gastos_raw_data.copy()
+        if 'fecha' in df_to_save_gastos.columns:
+            df_to_save_gastos['fecha'] = pd.to_datetime(df_to_save_gastos['fecha']).dt.strftime('%Y-%m-%d')
+        df_to_save_gastos.to_csv(GASTOS_FILE, index=False)
+        # Si prefieres Excel, descomenta la siguiente línea y comenta la anterior:
+        # st.session_state.gastos_raw_data.to_excel(GASTOS_FILE.replace(".csv", ".xlsx"), index=False, engine='xlsxwriter')
 
-def guardar_gasto_en_db(engine, gasto_data):
-    """Guarda un nuevo gasto en la base de datos."""
-    if not engine: return False
-    try:
-        with engine.connect() as conn:
-            query = text("""
-                INSERT INTO gastos (fecha, calculo, descripcion, gasto, dinero)
-                VALUES (:fecha, :calculo, :descripcion, :gasto, :dinero)
-            """)
-            conn.execute(query, gasto_data)
-            conn.commit()
-        return True
-    except Exception as e:
-        st.error(f"Error guardando gasto en la base de datos: {e}")
-        return False
+# Registrar la función de guardado para que se ejecute al finalizar la aplicación
+atexit.register(guardar_dataframes_en_archivos)
 
-def limpiar_ventas_db(engine):
-    """Elimina todas las ventas de la base de datos."""
-    if not engine: return False
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("DELETE FROM ventas"))
-            conn.commit()
-        return True
-    except Exception as e:
-        st.error(f"Error al limpiar ventas de la base de datos: {e}")
-        return False
-
-def limpiar_gastos_db(engine):
-    """Elimina todos los gastos de la base de datos."""
-    if not engine: return False
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("DELETE FROM gastos"))
-            conn.commit()
-        return True
-    except Exception as e:
-        st.error(f"Error al limpiar gastos de la base de datos: {e}")
-        return False
-
-# --- Funciones auxiliares para DataFrames ---
-def get_ventas_df_processed(engine):
-    """Carga y procesa el DataFrame de ventas para su visualización."""
-    df = cargar_ventas_desde_db(engine)
+# --- Funciones para DataFrames (actualizadas para usar st.session_state directamente) ---
+def get_ventas_df_processed():
+    """Procesa el DataFrame de ventas para su visualización desde raw data."""
+    df = st.session_state.ventas_raw_data.copy()
     if not df.empty:
         # Convertir a formato de fecha localizable para visualización
-        df['Fecha'] = pd.to_datetime(df['fecha']).dt.date
+        if 'fecha' in df.columns:
+            df['Fecha'] = pd.to_datetime(df['fecha']).dt.date
+        else: # Si por alguna razón falta 'fecha' en la carga inicial, crea una columna de fecha ficticia
+            df['Fecha'] = date.today() 
+            st.warning("Columna 'fecha' no encontrada en ventas_raw_data. Usando fecha actual.")
+        
         df = df.rename(columns={
             'fecha': 'Fecha DB', 'cliente': 'Cliente', 'tipo': 'Tipo', 'cantidad': 'Cantidad',
             'libras': 'Libras', 'descuento': 'Descuento', 'libras_netas': 'Libras_netas',
@@ -188,11 +93,16 @@ def get_ventas_df_processed(engine):
         df = df.sort_values(by=['Fecha', 'Cliente'], ascending=[False, True])
     return df
 
-def get_gastos_df_processed(engine):
-    """Carga y procesa el DataFrame de gastos para su visualización."""
-    df = cargar_gastos_desde_db(engine)
+def get_gastos_df_processed():
+    """Procesa el DataFrame de gastos para su visualización desde raw data."""
+    df = st.session_state.gastos_raw_data.copy()
     if not df.empty:
-        df['Fecha'] = pd.to_datetime(df['fecha']).dt.date
+        if 'fecha' in df.columns:
+            df['Fecha'] = pd.to_datetime(df['fecha']).dt.date
+        else: # Si por alguna razón falta 'fecha' en la carga inicial, crea una columna de fecha ficticia
+            df['Fecha'] = date.today()
+            st.warning("Columna 'fecha' no encontrada en gastos_raw_data. Usando fecha actual.")
+
         df = df.rename(columns={
             'fecha': 'Fecha DB', 'calculo': 'Calculo', 'descripcion': 'Descripcion',
             'gasto': 'Gasto', 'dinero': 'Dinero'
@@ -201,17 +111,54 @@ def get_gastos_df_processed(engine):
         df = df.sort_values(by='Fecha', ascending=False)
     return df
 
-# --- Inicialización principal ---
-engine = init_database()
+def guardar_venta(venta_data):
+    """Guarda una nueva venta en el DataFrame de session_state y luego en archivo."""
+    nueva_venta_df = pd.DataFrame([venta_data])
+    # Asegúrate de que las columnas coincidan para la concatenación
+    st.session_state.ventas_raw_data = pd.concat([nueva_venta_df, st.session_state.ventas_raw_data], ignore_index=True)
+    guardar_dataframes_en_archivos() # Guardar inmediatamente en archivo
+    return True
 
+def guardar_gasto(gasto_data):
+    """Guarda un nuevo gasto en el DataFrame de session_state y luego en archivo."""
+    nuevo_gasto_df = pd.DataFrame([gasto_data])
+    # Asegúrate de que las columnas coincidan para la concatenación
+    st.session_state.gastos_raw_data = pd.concat([nuevo_gasto_df, st.session_state.gastos_raw_data], ignore_index=True)
+    guardar_dataframes_en_archivos() # Guardar inmediatamente en archivo
+    return True
+
+def limpiar_ventas():
+    """Elimina todas las ventas del DataFrame y del archivo."""
+    st.session_state.ventas_raw_data = pd.DataFrame(columns=['fecha', 'cliente', 'tipo', 'cantidad', 'libras', 'descuento',
+                                                             'libras_netas', 'precio', 'total_a_cobrar', 'pago_cliente', 'saldo'])
+    guardar_dataframes_en_archivos() # Guardar el DataFrame vacío
+    if os.path.exists(VENTAS_FILE):
+        os.remove(VENTAS_FILE) # Eliminar el archivo físicamente
+    return True
+
+def limpiar_gastos():
+    """Elimina todos los gastos del DataFrame y del archivo."""
+    st.session_state.gastos_raw_data = pd.DataFrame(columns=['fecha', 'calculo', 'descripcion', 'gasto', 'dinero'])
+    guardar_dataframes_en_archivos() # Guardar el DataFrame vacío
+    if os.path.exists(GASTOS_FILE):
+        os.remove(GASTOS_FILE) # Eliminar el archivo físicamente
+    return True
+
+# --- Inicialización principal ---
 st.title("🐔 Sistema de Gestión de Ventas de Aves")
 
-# Inicializar datos en session state
-if 'ventas_data' not in st.session_state:
-    st.session_state.ventas_data = get_ventas_df_processed(engine)
+# Inicializar datos en session state cargando desde archivos
+# Se mantienen dos DataFrames: uno 'raw' para guardar y otro 'data' para visualizar
+if 'ventas_raw_data' not in st.session_state:
+    st.session_state.ventas_raw_data = cargar_ventas_desde_archivo()
+if 'ventas_data' not in st.session_state: # Este será el DataFrame procesado para mostrar
+    st.session_state.ventas_data = get_ventas_df_processed()
 
-if 'gastos_data' not in st.session_state:
-    st.session_state.gastos_data = get_gastos_df_processed(engine)
+if 'gastos_raw_data' not in st.session_state:
+    st.session_state.gastos_raw_data = cargar_gastos_desde_archivo()
+if 'gastos_data' not in st.session_state: # Este será el DataFrame procesado para mostrar
+    st.session_state.gastos_data = get_gastos_df_processed()
+
 
 # --- Listas predefinidas ---
 CLIENTES = [
@@ -219,7 +166,7 @@ CLIENTES = [
     "Sra Yolanda", "Sra Laura Mercado", "D. Segundo", "Legumbrero",
     "Peruana Posorja", "Sra. Sofia", "Sra. Jessica", "Sra Alado de Jessica",
     "Comedor Gordo Posorja", "Sra. Celeste", "Caro negro", "Tienda Isabel Posorja",
-    "Carnicero Posorja", "Sra. Narcisa", "Moreira","Senel", "D. Jonny", "D. Sra Madelyn", "Lobo Mercado"
+    "Carnicero Posorja", "Moreira","Senel", "D. Jonny", "D. Sra Madelyn", "Lobo Mercado"
 ]
 
 TIPOS_AVE = ["Pollo", "Gallina"]
@@ -265,7 +212,12 @@ def analizar_alertas_clientes(ventas_df):
 
     # Asegúrate de trabajar con una copia para evitar SettingWithCopyWarning
     df_temp = ventas_df.copy()
-    df_temp['Fecha'] = pd.to_datetime(df_temp['Fecha'])
+    # Asegurarse de que la columna 'Fecha' sea de tipo datetime para operaciones de fecha
+    if 'Fecha' in df_temp.columns:
+        df_temp['Fecha'] = pd.to_datetime(df_temp['Fecha'])
+    else: # Fallback si 'Fecha' no se creó correctamente
+        st.warning("Columna 'Fecha' no encontrada en df_temp para alertas. Algunas alertas podrían no ser precisas.")
+        df_temp['Fecha'] = pd.to_datetime(df_temp['Fecha DB']) # Usar 'Fecha DB' que es la original
 
     alertas = []
 
@@ -273,13 +225,18 @@ def analizar_alertas_clientes(ventas_df):
         cliente_ventas = df_temp[df_temp['Cliente'] == cliente].copy()
         cliente_ventas = cliente_ventas.sort_values('Fecha')
 
-        saldo_total = cliente_ventas['Saldo'].apply(lambda x: float(x.replace('$', '').replace(',', '')) if isinstance(x, str) else x).sum()
+        # Convertir 'Saldo' a numérico antes de sumar.
+        # Es crucial que esta columna tenga el formato de moneda quitado si está presente.
+        cliente_ventas['Saldo_num'] = cliente_ventas['Saldo'].apply(
+            lambda x: float(str(x).replace('$', '').replace(',', '')) if isinstance(x, (str, float, int)) else x
+        )
+        saldo_total = cliente_ventas['Saldo_num'].sum()
 
         debe_mas_10 = saldo_total > 10
 
         dias_consecutivos = 0
         # Filtrar solo fechas con saldo positivo
-        fechas_con_saldo = cliente_ventas[cliente_ventas['Saldo'].apply(lambda x: float(x.replace('$', '').replace(',', '')) if isinstance(x, str) else x) > 0]['Fecha'].dt.date.unique()
+        fechas_con_saldo = cliente_ventas[cliente_ventas['Saldo_num'] > 0]['Fecha'].dt.date.unique()
 
         if len(fechas_con_saldo) >= 2:
             fechas_ordenadas = sorted(list(fechas_con_saldo))
@@ -334,6 +291,7 @@ with st.expander("📝 Formulario de Nueva Venta", expanded=True):
     col1, col2, col3, col4 = st.columns(4)
     
     # Inicializar valores en session_state para que los campos del formulario puedan resetearse
+    # Estos son solo para el estado de los widgets, no los datos reales
     if 'cantidad_venta_val' not in st.session_state: st.session_state['cantidad_venta_val'] = 0
     if 'libras_venta_val' not in st.session_state: st.session_state['libras_venta_val'] = 0.0
     if 'descuento_venta_val' not in st.session_state: st.session_state['descuento_venta_val'] = 0.0
@@ -376,20 +334,11 @@ with st.expander("📝 Formulario de Nueva Venta", expanded=True):
                 'total_a_cobrar': total_cobrar, 'pago_cliente': pago_cliente, 'saldo': saldo
             }
             
-            if engine and guardar_venta_en_db(engine, venta_data):
-                st.session_state.ventas_data = get_ventas_df_processed(engine)
-                st.success(f"✅ Venta para **'{cliente}'** guardada exitosamente en la base de datos.")
+            if guardar_venta(venta_data): # Llama a la función que guarda en session_state y archivo
+                st.session_state.ventas_data = get_ventas_df_processed() # Actualiza el df procesado
+                st.success(f"✅ Venta para **'{cliente}'** guardada exitosamente.")
             else:
-                # Fallback para guardar en memoria si no hay DB o falla (esto no debería ocurrir con la DB activa)
-                nueva_fila_display = {
-                    'Fecha': fecha_venta, 'Cliente': cliente, 'Tipo': tipo_ave,
-                    'Cantidad': cantidad, 'Libras': libras, 'Descuento': descuento,
-                    'Libras_netas': libras_netas, 'Precio': precio,
-                    'Total_a_cobrar': total_cobrar, 'Pago_Cliente': pago_cliente, 'Saldo': saldo
-                }
-                # Concatena el nuevo DataFrame al inicio para que aparezca primero
-                st.session_state.ventas_data = pd.concat([pd.DataFrame([nueva_fila_display]), st.session_state.ventas_data], ignore_index=True)
-                st.info(f"✅ Venta para **'{cliente}'** agregada exitosamente (sin persistencia en DB).") # Cambiado a info para indicar que no hay persistencia real.
+                st.error(f"❌ Error al guardar la venta para **'{cliente}'**.")
             
             # Resetear valores del formulario usando keys de session_state
             st.session_state['cantidad_venta_val'] = 0
@@ -422,9 +371,9 @@ if not st.session_state.ventas_data.empty:
     
     # Resumen de ventas
     # Asegurarse de que los valores sean numéricos antes de sumar, quitando el símbolo de moneda y coma
-    total_ventas = st.session_state.ventas_data['Total_a_cobrar'].sum()
-    total_pagos = st.session_state.ventas_data['Pago_Cliente'].sum()
-    saldo_pendiente = st.session_state.ventas_data['Saldo'].sum()
+    total_ventas = st.session_state.ventas_raw_data['total_a_cobrar'].sum()
+    total_pagos = st.session_state.ventas_raw_data['pago_cliente'].sum()
+    saldo_pendiente = st.session_state.ventas_raw_data['saldo'].sum()
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -441,10 +390,9 @@ if not st.session_state.ventas_data.empty:
 
     with col_exp_imp_ventas_1:
         # Botón para descargar a Excel
-        # Asegurarse de descargar los datos tal como están en la DB (sin formateo de moneda)
-        df_for_download_ventas = cargar_ventas_desde_db(engine)
+        df_for_download_ventas = st.session_state.ventas_raw_data.copy()
         if not df_for_download_ventas.empty:
-            df_for_download_ventas['fecha'] = df_for_download_ventas['fecha'].dt.strftime('%Y-%m-%d') # Formato de fecha para Excel
+            df_for_download_ventas['fecha'] = pd.to_datetime(df_for_download_ventas['fecha']).dt.strftime('%Y-%m-%d') # Formato de fecha para Excel
             csv = df_for_download_ventas.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="⬇️ Descargar Ventas a Excel",
@@ -458,13 +406,16 @@ if not st.session_state.ventas_data.empty:
 
     with col_exp_imp_ventas_2:
         # Cargador de archivos para importar ventas
-        uploaded_file_ventas = st.file_uploader("⬆️ Importar Ventas desde Excel", type=["xlsx"], key="upload_ventas_excel")
+        uploaded_file_ventas = st.file_uploader("⬆️ Importar Ventas desde Excel/CSV", type=["xlsx", "csv"], key="upload_ventas_excel")
         if uploaded_file_ventas:
             try:
-                df_imported_ventas = pd.read_excel(uploaded_file_ventas)
+                if uploaded_file_ventas.name.endswith('.xlsx'):
+                    df_imported_ventas = pd.read_excel(uploaded_file_ventas)
+                else: # .csv
+                    df_imported_ventas = pd.read_csv(uploaded_file_ventas)
                 
-                # Nombres de columnas esperados en la DB
-                expected_cols_db_ventas = [
+                # Nombres de columnas esperados (minúsculas y sin espacios)
+                expected_cols_raw_ventas = [
                     'fecha', 'cliente', 'tipo', 'cantidad', 'libras', 'descuento', 
                     'libras_netas', 'precio', 'total_a_cobrar', 'pago_cliente', 'saldo'
                 ]
@@ -473,59 +424,55 @@ if not st.session_state.ventas_data.empty:
                 df_imported_ventas.columns = df_imported_ventas.columns.str.lower().str.replace(' ', '_')
 
                 # Validar que las columnas necesarias existan
-                if not all(col in df_imported_ventas.columns for col in expected_cols_db_ventas):
-                    st.error(f"❌ El archivo Excel de ventas no tiene las columnas requeridas. Asegúrate de que existan: {', '.join(expected_cols_db_ventas)}")
+                if not all(col in df_imported_ventas.columns for col in expected_cols_raw_ventas):
+                    st.error(f"❌ El archivo importado no tiene las columnas requeridas o tienen nombres incorrectos. Asegúrate de que existan: {', '.join(expected_cols_raw_ventas)}")
                 else:
-                    rows_imported = 0
-                    errors_found = 0
-                    for index, row in df_imported_ventas.iterrows():
-                        try:
-                            # Asegurarse de que la fecha sea un objeto date
-                            if isinstance(row['fecha'], pd.Timestamp):
-                                fecha_obj = row['fecha'].date()
-                            else:
-                                fecha_obj = pd.to_datetime(row['fecha']).date()
-
-                            venta_data = {
-                                'fecha': fecha_obj,
-                                'cliente': str(row['cliente']),
-                                'tipo': str(row['tipo']),
-                                'cantidad': int(row['cantidad']),
-                                'libras': float(row['libras']),
-                                'descuento': float(row['descuento']),
-                                'libras_netas': float(row['libras_netas']),
-                                'precio': float(row['precio']),
-                                'total_a_cobrar': float(row['total_a_cobrar']),
-                                'pago_cliente': float(row['pago_cliente']),
-                                'saldo': float(row['saldo'])
-                            }
-                            if engine and guardar_venta_en_db(engine, venta_data):
-                                rows_imported += 1
-                            else:
-                                errors_found += 1
-                        except Exception as e:
-                            errors_found += 1
-                            st.warning(f"⚠️ Error al importar fila {index + 2} (datos: {row.to_dict()}): {e}")
-
-                    if rows_imported > 0:
-                        st.session_state.ventas_data = get_ventas_df_processed(engine)
-                        st.success(f"✅ Se importaron **{rows_imported}** ventas exitosamente desde el archivo Excel.")
-                        if errors_found > 0:
-                            st.warning(f"Se encontraron {errors_found} errores al importar algunas filas.")
-                        st.rerun()
-                    elif errors_found > 0:
-                        st.error("No se pudo importar ninguna venta. Revisa los errores detallados arriba.")
+                    # Convertir el DataFrame importado para que coincida con el formato de fecha esperado
+                    # y asegurar tipos de datos correctos antes de concatenar
+                    for col in ['cantidad']:
+                        if col in df_imported_ventas.columns:
+                            df_imported_ventas[col] = pd.to_numeric(df_imported_ventas[col], errors='coerce').fillna(0).astype(int)
+                    for col in ['libras', 'descuento', 'libras_netas', 'precio', 'total_a_cobrar', 'pago_cliente', 'saldo']:
+                         if col in df_imported_ventas.columns:
+                            df_imported_ventas[col] = pd.to_numeric(df_imported_ventas[col], errors='coerce').fillna(0.0).round(2)
+                    
+                    if 'fecha' in df_imported_ventas.columns:
+                        df_imported_ventas['fecha'] = pd.to_datetime(df_imported_ventas['fecha'], errors='coerce').dt.date
+                        df_imported_ventas.dropna(subset=['fecha'], inplace=True) # Eliminar filas sin fecha válida
                     else:
-                        st.info("No se encontraron ventas válidas en el archivo para importar.")
+                        st.error("❌ La columna 'fecha' es obligatoria para importar ventas.")
+                        df_imported_ventas = pd.DataFrame() # Vaciar el DF si no hay fecha válida
+
+                    if not df_imported_ventas.empty:
+                        # Filtrar solo las columnas que necesitamos para la concatenación y reordenar
+                        df_imported_ventas = df_imported_ventas[expected_cols_raw_ventas]
+
+                        # Concatena el nuevo DataFrame con el existente
+                        initial_rows = len(st.session_state.ventas_raw_data)
+                        st.session_state.ventas_raw_data = pd.concat([st.session_state.ventas_raw_data, df_imported_ventas], ignore_index=True)
+                        # Eliminar duplicados basándose en un subconjunto de columnas que definan una venta única
+                        st.session_state.ventas_raw_data.drop_duplicates(subset=['fecha', 'cliente', 'tipo', 'cantidad', 'libras', 'precio'], keep='first', inplace=True) 
+                        
+                        rows_imported = len(st.session_state.ventas_raw_data) - initial_rows
+
+                        if rows_imported > 0:
+                            guardar_dataframes_en_archivos() # Guardar después de la importación
+                            st.session_state.ventas_data = get_ventas_df_processed() # Actualiza el df procesado
+                            st.success(f"✅ Se importaron **{rows_imported}** ventas exitosamente desde el archivo.")
+                            st.rerun()
+                        else:
+                            st.info("No se encontraron ventas válidas o nuevas en el archivo para importar.")
+                    else:
+                        st.info("El archivo importado está vacío o no contiene datos válidos.")
 
             except Exception as e:
-                st.error(f"❌ Error al leer el archivo Excel de ventas: {e}. Asegúrate de que sea un archivo .xlsx válido y tenga el formato correcto.")
+                st.error(f"❌ Error al leer el archivo de ventas: {e}. Asegúrate de que sea un archivo .xlsx o .csv válido y tenga el formato correcto.")
 else:
     st.info("📝 No hay ventas registradas. ¡Empieza a agregar ventas usando el formulario de arriba!")
 
 
 # Botón para limpiar datos de ventas
-if not st.session_state.ventas_data.empty:
+if not st.session_state.ventas_raw_data.empty: # Usar raw_data para la condición
     with st.expander("🗑️ Opciones Avanzadas de Ventas (Eliminar Datos)"):
         st.error("¡Esta acción eliminará PERMANENTEMENTE todas las ventas! Úsala con extrema precaución y solo si estás seguro.")
         # Primer nivel de confirmación
@@ -536,16 +483,11 @@ if not st.session_state.ventas_data.empty:
         # Segundo nivel de confirmación
         if st.session_state.get('confirm_delete_ventas', False):
             if st.button("🚨 CONFIRMAR ELIMINACIÓN PERMANENTE DE VENTAS 🚨", type="danger", use_container_width=True, key="limpiar_ventas_confirm_step2"):
-                if engine and limpiar_ventas_db(engine):
-                    st.session_state.ventas_data = get_ventas_df_processed(engine)
-                    st.success("✅ Todas las ventas han sido eliminadas exitosamente de la base de datos y de la aplicación.")
+                if limpiar_ventas(): # Llama a la función de limpieza
+                    st.session_state.ventas_data = get_ventas_df_processed() # Actualiza el df procesado
+                    st.success("✅ Todas las ventas han sido eliminadas exitosamente.")
                 else:
-                    # Si no hay DB o falló, limpiar solo el estado (esto no debería ocurrir si la DB está activa)
-                    st.session_state.ventas_data = pd.DataFrame(columns=[
-                        'Fecha', 'Cliente', 'Tipo', 'Cantidad', 'Libras', 'Descuento', 
-                        'Libras_netas', 'Precio', 'Total_a_cobrar', 'Pago_Cliente', 'Saldo'
-                    ])
-                    st.info("✅ Todas las ventas han sido eliminadas del registro local (sin persistencia en DB).")
+                    st.error("❌ Ocurrió un error al intentar eliminar las ventas.")
                 st.session_state['confirm_delete_ventas'] = False # Resetear confirmación
                 st.rerun()
             if st.button("Cancelar Eliminación de Ventas", use_container_width=True, key="cancel_delete_ventas_form"):
@@ -589,18 +531,11 @@ with st.expander("📝 Formulario de Nuevo Gasto", expanded=True):
                 'dinero': dinero
             }
             
-            if engine and guardar_gasto_en_db(engine, gasto_data):
-                st.session_state.gastos_data = get_gastos_df_processed(engine)
-                st.success(f"✅ Gasto de **'{categoria_gasto}'** por {formatear_moneda(dinero)} guardado exitosamente en la base de datos.")
+            if guardar_gasto(gasto_data): # Llama a la función que guarda en session_state y archivo
+                st.session_state.gastos_data = get_gastos_df_processed() # Actualiza el df procesado
+                st.success(f"✅ Gasto de **'{categoria_gasto}'** por {formatear_moneda(dinero)} guardado exitosamente.")
             else:
-                # Fallback para guardar en memoria si no hay DB o falla (esto no debería ocurrir con la DB activa)
-                nuevo_gasto_display = {
-                    'Fecha': fecha_gasto, 'Calculo': calculo, 'Descripcion': descripcion,
-                    'Gasto': categoria_gasto, 'Dinero': dinero
-                }
-                # Concatena el nuevo DataFrame al inicio para que aparezca primero
-                st.session_state.gastos_data = pd.concat([pd.DataFrame([nuevo_gasto_display]), st.session_state.gastos_data], ignore_index=True)
-                st.info(f"✅ Gasto de **'{categoria_gasto}'** por {formatear_moneda(dinero)} agregado exitosamente (sin persistencia en DB).")
+                st.error(f"❌ Error al guardar el gasto para **'{categoria_gasto}'**.")
             
             # Resetear valores del formulario
             st.session_state['calculo_gasto_val'] = 0.0
@@ -627,7 +562,7 @@ if not st.session_state.gastos_data.empty:
     st.dataframe(df_display_gastos, use_container_width=True, hide_index=True)
     
     # Resumen de gastos
-    total_gastos = st.session_state.gastos_data['Dinero'].sum()
+    total_gastos = st.session_state.gastos_raw_data['dinero'].sum()
     st.metric("💸 Total Gastos Registrados", formatear_moneda(total_gastos))
 
     st.markdown("---")
@@ -637,10 +572,9 @@ if not st.session_state.gastos_data.empty:
 
     with col_exp_imp_gastos_1:
         # Botón para descargar a Excel
-        # Asegurarse de descargar los datos tal como están en la DB (sin formateo de moneda)
-        df_for_download_gastos = cargar_gastos_desde_db(engine)
+        df_for_download_gastos = st.session_state.gastos_raw_data.copy()
         if not df_for_download_gastos.empty:
-            df_for_download_gastos['fecha'] = df_for_download_gastos['fecha'].dt.strftime('%Y-%m-%d') # Formato de fecha para Excel
+            df_for_download_gastos['fecha'] = pd.to_datetime(df_for_download_gastos['fecha']).dt.strftime('%Y-%m-%d') # Formato de fecha para Excel
             csv_gastos = df_for_download_gastos.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="⬇️ Descargar Gastos a Excel",
@@ -654,13 +588,16 @@ if not st.session_state.gastos_data.empty:
 
     with col_exp_imp_gastos_2:
         # Cargador de archivos para importar gastos
-        uploaded_file_gastos = st.file_uploader("⬆️ Importar Gastos desde Excel", type=["xlsx"], key="upload_gastos_excel")
+        uploaded_file_gastos = st.file_uploader("⬆️ Importar Gastos desde Excel/CSV", type=["xlsx", "csv"], key="upload_gastos_excel")
         if uploaded_file_gastos:
             try:
-                df_imported_gastos = pd.read_excel(uploaded_file_gastos)
+                if uploaded_file_gastos.name.endswith('.xlsx'):
+                    df_imported_gastos = pd.read_excel(uploaded_file_gastos)
+                else: # .csv
+                    df_imported_gastos = pd.read_csv(uploaded_file_gastos)
                 
-                # Nombres de columnas esperados en la DB
-                expected_cols_db_gastos = [
+                # Nombres de columnas esperados (minúsculas y sin espacios)
+                expected_cols_raw_gastos = [
                     'fecha', 'calculo', 'descripcion', 'gasto', 'dinero'
                 ]
 
@@ -668,52 +605,52 @@ if not st.session_state.gastos_data.empty:
                 df_imported_gastos.columns = df_imported_gastos.columns.str.lower().str.replace(' ', '_')
 
                 # Validar que las columnas necesarias existan
-                if not all(col in df_imported_gastos.columns for col in expected_cols_db_gastos):
-                    st.error(f"❌ El archivo Excel de gastos no tiene las columnas requeridas. Asegúrate de que existan: {', '.join(expected_cols_db_gastos)}")
+                if not all(col in df_imported_gastos.columns for col in expected_cols_raw_gastos):
+                    st.error(f"❌ El archivo importado no tiene las columnas requeridas o tienen nombres incorrectos. Asegúrate de que existan: {', '.join(expected_cols_raw_gastos)}")
                 else:
-                    rows_imported = 0
-                    errors_found = 0
-                    for index, row in df_imported_gastos.iterrows():
-                        try:
-                            # Asegurarse de que la fecha sea un objeto date
-                            if isinstance(row['fecha'], pd.Timestamp):
-                                fecha_obj = row['fecha'].date()
-                            else:
-                                fecha_obj = pd.to_datetime(row['fecha']).date()
-
-                            gasto_data = {
-                                'fecha': fecha_obj,
-                                'calculo': float(row['calculo']),
-                                'descripcion': str(row['descripcion']) if pd.notna(row['descripcion']) else '',
-                                'gasto': str(row['gasto']),
-                                'dinero': float(row['dinero'])
-                            }
-                            if engine and guardar_gasto_en_db(engine, gasto_data):
-                                rows_imported += 1
-                            else:
-                                errors_found += 1
-                        except Exception as e:
-                            errors_found += 1
-                            st.warning(f"⚠️ Error al importar fila {index + 2} (datos: {row.to_dict()}): {e}")
-
-                    if rows_imported > 0:
-                        st.session_state.gastos_data = get_gastos_df_processed(engine)
-                        st.success(f"✅ Se importaron **{rows_imported}** gastos exitosamente desde el archivo Excel.")
-                        if errors_found > 0:
-                            st.warning(f"Se encontraron {errors_found} errores al importar algunas filas.")
-                        st.rerun()
-                    elif errors_found > 0:
-                        st.error("No se pudo importar ningún gasto. Revisa los errores detallados arriba.")
+                    # Convertir el DataFrame importado para que coincida con el formato de fecha esperado
+                    # y asegurar tipos de datos correctos antes de concatenar
+                    for col in ['calculo', 'dinero']:
+                         if col in df_imported_gastos.columns:
+                            df_imported_gastos[col] = pd.to_numeric(df_imported_gastos[col], errors='coerce').fillna(0.0).round(2)
+                    
+                    if 'fecha' in df_imported_gastos.columns:
+                        df_imported_gastos['fecha'] = pd.to_datetime(df_imported_gastos['fecha'], errors='coerce').dt.date
+                        df_imported_gastos.dropna(subset=['fecha'], inplace=True) # Eliminar filas sin fecha válida
                     else:
-                        st.info("No se encontraron gastos válidos en el archivo para importar.")
+                        st.error("❌ La columna 'fecha' es obligatoria para importar gastos.")
+                        df_imported_gastos = pd.DataFrame() # Vaciar el DF si no hay fecha válida
+
+
+                    if not df_imported_gastos.empty:
+                        # Filtrar solo las columnas que necesitamos para la concatenación
+                        df_imported_gastos = df_imported_gastos[expected_cols_raw_gastos]
+
+                        # Concatena el nuevo DataFrame con el existente
+                        initial_rows = len(st.session_state.gastos_raw_data)
+                        st.session_state.gastos_raw_data = pd.concat([st.session_state.gastos_raw_data, df_imported_gastos], ignore_index=True)
+                        # Eliminar duplicados basándose en un subconjunto de columnas que definan un gasto único
+                        st.session_state.gastos_raw_data.drop_duplicates(subset=['fecha', 'gasto', 'dinero'], keep='first', inplace=True) 
+                        
+                        rows_imported = len(st.session_state.gastos_raw_data) - initial_rows
+
+                        if rows_imported > 0:
+                            guardar_dataframes_en_archivos() # Guardar después de la importación
+                            st.session_state.gastos_data = get_gastos_df_processed() # Actualiza el df procesado
+                            st.success(f"✅ Se importaron **{rows_imported}** gastos exitosamente desde el archivo.")
+                            st.rerun()
+                        else:
+                            st.info("No se encontraron gastos válidos o nuevos en el archivo para importar.")
+                    else:
+                        st.info("El archivo importado está vacío o no contiene datos válidos.")
 
             except Exception as e:
-                st.error(f"❌ Error al leer el archivo Excel de gastos: {e}. Asegúrate de que sea un archivo .xlsx válido y tenga el formato correcto.")
+                st.error(f"❌ Error al leer el archivo de gastos: {e}. Asegúrate de que sea un archivo .xlsx o .csv válido y tenga el formato correcto.")
 else:
     st.info("📝 No hay gastos registrados. ¡Empieza a agregar gastos usando el formulario de arriba!")
 
 # Botón para limpiar datos de gastos
-if not st.session_state.gastos_data.empty:
+if not st.session_state.gastos_raw_data.empty: # Usar raw_data para la condición
     with st.expander("🗑️ Opciones Avanzadas de Gastos (Eliminar Datos)"):
         st.error("¡Esta acción eliminará PERMANENTEMENTE todos los gastos! Úsala con extrema precaución y solo si estás seguro.")
         # Primer nivel de confirmación
@@ -724,18 +661,15 @@ if not st.session_state.gastos_data.empty:
         # Segundo nivel de confirmación
         if st.session_state.get('confirm_delete_gastos', False):
             if st.button("🚨 CONFIRMAR ELIMINACIÓN PERMANENTE DE GASTOS 🚨", type="danger", use_container_width=True, key="limpiar_gastos_confirm_step2"):
-                if engine and limpiar_gastos_db(engine):
-                    st.session_state.gastos_data = get_gastos_df_processed(engine)
-                    st.success("✅ Todos los gastos han sido eliminados exitosamente de la base de datos y de la aplicación.")
+                if limpiar_gastos(): # Llama a la función de limpieza
+                    st.session_state.gastos_data = get_gastos_df_processed() # Actualiza el df procesado
+                    st.success("✅ Todos los gastos han sido eliminados exitosamente.")
                 else:
-                    # Si no hay DB o falló, limpiar solo el estado
-                    st.session_state.gastos_data = pd.DataFrame(columns=[
-                        'Fecha', 'Calculo', 'Descripcion', 'Gasto', 'Dinero'
-                    ])
-                    st.info("✅ Todos los gastos han sido eliminados del registro local (sin persistencia en DB).")
+                    st.error("❌ Ocurrió un error al intentar eliminar los gastos.")
                 st.session_state['confirm_delete_gastos'] = False # Resetear confirmación
                 st.rerun()
             if st.button("Cancelar Eliminación de Gastos", use_container_width=True, key="cancel_delete_gastos_form"):
                 st.session_state['confirm_delete_gastos'] = False
                 st.info("Operación de limpieza de gastos cancelada.")
                 st.rerun()
+
