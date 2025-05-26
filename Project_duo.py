@@ -218,7 +218,7 @@ CLIENTES = [
     "Sra Yolanda", "Sra Laura Mercado", "D. Segundo", "Legumbrero",
     "Peruana Posorja", "Sra. Sofia", "Sra. Jessica", "Sra Alado de Jessica",
     "Comedor Gordo Posorja", "Sra. Celeste", "Caro negro", "Tienda Isabel Posorja",
-    "Carnicero Posorja", "Senel", "D. Jonny", "D. Sra Madelyn", "Lobo Mercado"
+    "Carnicero Posorja", "Moreira","Senel", "D. Jonny", "D. Sra Madelyn", "Lobo Mercado"
 ]
 
 TIPOS_AVE = ["Pollo", "Gallina"]
